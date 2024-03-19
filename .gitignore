@@ -1,0 +1,6 @@
+/consensus/beacondata
+/consensus/validatordata
+/consensus/genesis.ssz
+
+/execution/geth
+/execution/geth.ipc

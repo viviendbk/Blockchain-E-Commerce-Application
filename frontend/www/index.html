@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Store</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="ethers-5.2.js" type="application/javascript"></script>
+    <script src="wallet.js"></script>
+</head>
+<body class="bg-gray-100">
+
+    <div class="container mx-auto px-4">
+        <div id="authButtons" class="pt-10 flex justify-end">
+            <!-- Authentication buttons will be inserted here -->
+        </div>
+
+        <h1 class="text-xl font-semibold text-gray-800 my-6">Online Store</h1>
+
+        <div id="profileInfo">
+            <!-- Profile info will be inserted here -->
+        </div>
+
+        <!-- Form to add an item -->
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 my-4">
+            <h2 class="text-lg mb-4">Add an item for sale</h2>
+            <form id="addItemForm">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="itemName">Item Name</label>
+                    <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="itemName" type="text" placeholder="Item Name">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="itemPrice">Price</label>
+                    <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="itemPrice" type="number" placeholder="Price in €">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="itemImage">Image URL</label>
+                    <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline" id="itemImage" type="text" placeholder="http://">
+                </div>
+                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+                    Add
+                </button>
+            </form>
+        </div>
+
+        <!-- List of items -->
+        <div id="itemsList" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
+        <script src="index.js"></script>
+</body>
+</html>

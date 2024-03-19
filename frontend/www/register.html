@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="ethers-5.2.js"></script>
+    <script src="wallet.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4">
+        <div class="pt-10 ">
+            <a href="/" class="text-blue-500 hover:underline">Home</a>
+        </div>
+        <h1 class="text-xl font-semibold text-gray-800 my-6">Register</h1>
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <form id="registerForm">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="username">Username</label>
+                    <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="username" name="username" type="text" placeholder="Username" required>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="password">Password</label>
+                    <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline" id="password" name="password" type="password" placeholder="********" required>
+                </div>
+                <!-- Removed the balance input as it is not used in the backend for registration -->
+                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button" onclick="registerUser()">
+                    Register
+                </button>
+            </form>
+        </div>
+    </div>
+    <script>
+        async function registerUser() {
+
+            const formData = {
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+            };
+
+            if (!formData.username || !formData.password) {
+                alert('Please fill in all fields.');
+                return;
+            }
+
+            const id = ethers.utils.hexlify(ethers.utils.randomBytes(32));
+            console.log(`Generated User ID (use as salt): ${id}`);
+
+            wallet = await generateWallet(formData.password, id);
+
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id,
+                        address: wallet.address,
+                        username: formData.username,
+                        password: formData.password,
+                    }),
+                });
+
+                if (response.status === 201) {
+                    // Registration successful, redirect to the root of the website
+                    window.location.href = '/';
+                } else {
+                    // Handle errors or invalid data
+                    alert('Registration failed. Please try again.');
+                }
+            } catch (error) {
+                console.error('Error registering user:', error);
+                alert('An error occurred. Please try again.');
+            }
+        }
+    </script>
+</body>
+</html>

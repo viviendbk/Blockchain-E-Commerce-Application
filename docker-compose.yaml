@@ -1,0 +1,306 @@
+version: '3.8'
+
+services:
+  frontend:
+    image: nginx
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./frontend/www:/usr/share/nginx/html
+      - ./frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - frontend-net
+    depends_on:
+      - backend-shop
+      - backend-payment
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+  backend-shop:
+    build: ./backend-shop
+    environment:
+      PGUSER: ${POSTGRES_USER}
+      PGHOST: db-shop
+      PGDATABASE: ${POSTGRES_DB}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGPORT: 5432
+      PLATFORM_PRIVATE_KEY: ${PLATFORM_PRIVATE_KEY}
+      PLATFORM_ADDRESS: ${PLATFORM_ADDRESS}
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - backend-shop-net
+      - frontend-net
+    depends_on:
+      - db-shop
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    env_file: .env
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+  backend-payment:
+    build: ./backend-payment
+    ports:
+      - "127.0.0.1:3001:3001"
+    networks:
+      - backend-payment-net
+      - frontend-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+  db-shop:
+    image: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db-shop-volume:/var/lib/postgresql/data
+      - ./init-db-shop:/docker-entrypoint-initdb.d
+    networks:
+      - backend-shop-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    env_file: .env
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "${POSTGRES_DB}", "-U", "${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+  # Setup a geth node for the payment backend blockchain. This is a private blockchain started with the genesis.json file.
+
+  # Creates a genesis state for the beacon chain using a YAML configuration file and
+  # a deterministic set of 64 validators.
+  create-beacon-chain-genesis:
+    image: "gcr.io/prysmaticlabs/prysm/cmd/prysmctl"
+    command: []
+    entrypoint: ["/bin/bash", "/consensus/genesis.sh"]
+    volumes:
+      - ./consensus:/consensus
+      - ./execution:/execution
+    networks:
+      - backend-payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+
+  # Removes the database of the go-ethereum execution client to ensure we start from a clean state.
+  # (geth has a `removedb` option, but it asks for a keyboard confirmation, so we use this instead)
+  geth-remove-db:
+    image: "alpine:3.19.0"
+    command: echo "Db reset disabled" # rm -rf /execution/geth
+    volumes:
+      - ./execution:/execution
+    networks:
+      - backend-payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+
+  # Sets up the genesis configuration for the go-ethereum client from a JSON file.
+  geth-genesis:
+    image: "ethereum/client-go:latest"
+    command: []
+    entrypoint: ["/bin/sh", "/execution/genesis.sh"]
+    volumes:
+      - ./execution:/execution
+      - ./execution/genesis.json:/execution/genesis.json
+    depends_on:
+      create-beacon-chain-genesis:
+        condition: service_completed_successfully
+      geth-remove-db:
+        condition: service_completed_successfully
+    networks:
+      - backend-payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+
+  # Runs a Prysm beacon chain from a specified genesis state created in the previous step
+  # and connects to go-ethereum in the same network as the execution client.
+  # The account used in go-ethereum is set as the suggested fee recipient for transactions
+  # proposed via the validators attached to the beacon node.
+  beacon-chain:
+    image: "gcr.io/prysmaticlabs/prysm/beacon-chain:v4.1.1"
+    env_file: .env
+    command:
+      - --datadir=/consensus/beacondata
+      # No peers to sync with in this testnet, so setting to 0
+      - --min-sync-peers=0
+      - --genesis-state=/consensus/genesis.ssz
+      - --bootstrap-node=
+      - --interop-eth1data-votes
+      # The chain configuration file used for setting up Prysm
+      - --chain-config-file=/consensus/config.yml
+      # We specify the chain id used by our execution client
+      - --contract-deployment-block=0
+      - --chain-id=${CHAIN_ID:-32382}
+      - --rpc-host=0.0.0.0
+      - --grpc-gateway-host=0.0.0.0
+      - --execution-endpoint=http://geth:8551
+      - --accept-terms-of-use
+      - --jwt-secret=${JWT_SECRET_FILE}
+      - --suggested-fee-recipient=0x123463a4b065722e99115d6c222f267d9cabb524
+      - --minimum-peers-per-subnet=0
+      - --enable-debug-rpc-endpoints
+      # - --force-clear-db
+    depends_on:
+      create-beacon-chain-genesis:
+        condition: service_completed_successfully
+    # ports:
+    #   - 127.0.0.1:4000:4000
+    #   - 127.0.0.1:3500:3500
+    #   - 127.0.0.1:8080:8080
+    #   - 127.0.0.1:6060:6060
+    #   - 127.0.0.1:9090:9090
+    volumes:
+      - ./consensus:/consensus
+      - ./execution:/execution
+      - .${JWT_SECRET_FILE}:/execution/jwtsecret
+    networks:
+      - backend-payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+
+  # Runs the go-ethereum execution client with the specified, unlocked account and necessary
+  # APIs to allow for proof-of-stake consensus via Prysm.
+  geth:
+    image: "ethereum/client-go:latest"
+    env_file: .env
+    command:
+      - --http
+      - --http.api=eth,net,web3
+      - --http.addr=0.0.0.0
+      - --http.corsdomain=*
+      - --http.vhosts=*
+      - --ws
+      - --ws.api=eth,net,web3
+      - --ws.addr=0.0.0.0
+      - --ws.origins=*
+      - --authrpc.vhosts=*
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.jwtsecret=${JWT_SECRET_FILE}
+      - --datadir=/execution
+      - --allow-insecure-unlock
+      - --unlock=0x123463a4b065722e99115d6c222f267d9cabb524
+      - --password=${GETH_PASSWORD_FILE}
+      - --nodiscover
+      - --syncmode=full
+    # ports:
+    #   - 127.0.0.1:8551:8551
+    #   - 127.0.0.1:8545:8545
+    #   - 127.0.0.1:8546:8546
+    depends_on:
+      geth-genesis:
+        condition: service_completed_successfully
+      beacon-chain:
+        condition: service_started
+    volumes:
+      - ./execution:/execution
+      - .${JWT_SECRET_FILE}:/execution/jwtsecret
+      - ./execution/geth_password.txt:/execution/geth_password.txt
+    networks:
+      - backend-payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+
+  # We run a validator client with 64, deterministically-generated keys that match
+  # the validator keys present in the beacon chain genesis state generated a few steps above.
+  validator:
+    image: "gcr.io/prysmaticlabs/prysm/validator:v4.1.1"
+    command:
+      - --beacon-rpc-provider=beacon-chain:4000
+      - --datadir=/consensus/validatordata
+      - --accept-terms-of-use
+      - --interop-num-validators=64
+      - --interop-start-index=0
+      - --chain-config-file=/consensus/config.yml
+      # - --force-clear-db
+      - --verbosity=warn
+    depends_on:
+      beacon-chain:
+        condition: service_started
+    volumes:
+      - ./consensus:/consensus
+    networks:
+      - backend-payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+
+volumes:
+  db-shop-volume:
+  geth-volume:
+  chaindata-volume:
+
+networks:
+  frontend-net:
+  backend-shop-net:
+  backend-payment-net:
